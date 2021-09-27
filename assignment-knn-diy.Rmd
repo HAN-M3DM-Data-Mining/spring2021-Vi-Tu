@@ -1,8 +1,8 @@
 ---
 title: "Assigment - kNN DIY"
-author:
-  - name author here - Author
-  - name reviewer here - Reviewer
+author: 
+  - Vi Tu - Author
+  - Khoa Nguyen - Reviewer
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
    html_notebook:
@@ -13,27 +13,97 @@ output:
 
 ```{r}
 library(tidyverse)
-library(googlesheets4)
+library(dplyr)
+library(readr)
 library(class)
 library(caret)
 ```
 
 ---
 
-Choose a suitable dataset from [this](https://github.com/HAN-M3DM-Data-Mining/assignments/tree/master/datasets) folder and train  your own kNN model. Follow all the steps from the CRISP-DM model.
-
-
 ## Business Understanding
-text and code here
+Occupancy is important to business as it shows how well the business is. Besides, with the ability to predict on occupancy rate, companies could utilize its resources and save unnecessary operation costs such as energy.
 
 ## Data Understanding
-text and code here
+The first step is to choose one dataset and import into RStudio. I choose the Occupancy dataset to practice on KNN. I imported the raw data via an url linked to the repository on GitHub. 
+```{r}
+url <- "https://raw.githubusercontent.com/HAN-M3DM-Data-Mining/assignments/master/datasets/KNN-occupancy.csv"
+rawDF <- read.csv(url)
+str(rawDF)
+```
+
+After having the data imported, I want to know in more details about the data set. Based on the result of [str()], there are 7 columns and 8143 rows in this data set. The data set records the values for Date (1), Temperature (2), Humidity (3), Light (4), CO2 (5), HumidityRatio (6) and Occupancy (7).
 
 ## Data Preparation
-text and code here
+The first column is indicating the date and time of the observations, which could be considered as a unique value for each observation. Thus, it is not useful for this prediction model that I am working on, I decided to remove this column from the dataset.
+```{r}
+cleanDF <- rawDF[-1]
+head(cleanDF)
+```
+
+The variable named "Occupancy" is our target label because it contains the outcomes; '0' for 'Unoccupied', '1' for 'Occupied'. 
+```{r}
+countOccu <- table(cleanDF$Occupancy)
+propOccu <- round(prop.table(countOccu) * 100 , digits = 1)
+
+countOccu #   [0] 6414    [1] 1729 
+propOccu #    [0] 78.8    [1] 21.2 
+```
+
+The label "Occupancy" of the data set should be converted from character type into factor for the model to work properly. Therefore, I converted and assigned names for this label as follow.
+```{r}
+cleanDF$Occupancy <- factor(cleanDF$Occupancy, levels = c("0","1"), labels = c("UnOccupied","Occupied")) %>% relevel("Occupied")
+head(cleanDF)
+
+summary(cleanDF)
+```
+
+Looking at the summary of [cleanDF] I recognized very different ranges among the variables. This means that that some variables have more influence on the algorithm than the others. I need to solve this by applying normalize function to re-scale them to standard range of values. This technique is applied to all the variables except for the result "Occupancy".
+```{r}
+normalize <- function(x) { # Function takes in a vector
+return ((x - min(x)) / (max(x) - min(x))) # distance of item value - minimum vector value divided by the range of all vector values
+}
+
+cleanDF_n <- sapply(1:5,
+                    function(x) {
+                      normalize(cleanDF[,x])
+                    }) %>% as.data.frame()
+summary(cleanDF_n)
+```
+
+
+```{r}
+testSet1 <- c(1:5)
+testSet2 <- c(1:5)*10
+cat("testSet1:", testSet1, "\n")
+cat("testSet2:", testSet2, "\n")
+cat("Normalized testSet1:", normalize(testSet1), "\n")
+cat("Normalized testSet2:", normalize(testSet2))
+
+```
+
+After normalizing the data, we then move on to split the original dataset into training and testing sets.
+```{r}
+train_DF <- cleanDF_n[1:4700,]
+test_DF <- cleanDF_n[4701:8143,]
+train_labels <- cleanDF[1:4700,6]
+test_labels <- cleanDF[4701:8143,6]
+```
 
 ## Modeling
-text and code here
+K-value stands for how many 'Neighbour' data points it looks for to make the conclusion in the model. A common used method is using the square root of total number of datapoints.
+```{r}
+x <- sqrt(nrow(cleanDF_n))
+cleanDF_test_pred <- knn(train = as.matrix(train_DF), test = as.matrix(test_DF), cl = as.matrix(train_labels), k = x)
+head(cleanDF_test_pred)
+```
+
+Finally, a confusionMatrix is created to show how well the model performed.
+```{r}
+confusionMatrix(cleanDF_test_pred, test_labels, positive = NULL, dnn = c("Prediction", "True"))
+
+```
+
 
 ## Evaluation and Deployment
 text and code here
