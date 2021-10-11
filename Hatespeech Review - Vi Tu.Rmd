@@ -1,0 +1,176 @@
+---
+title: "Assigment - Naive Bayes DIY"
+author:
+  - Author: Khoa Dang Nguyen
+  - Reviewer: Vi Tu
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+   html_notebook:
+    toc: true
+    toc_depth: 2
+---
+
+```{r}
+library(tidyverse)
+library(tm)
+library(caret)
+library(wordcloud)
+library(e1071)
+```
+
+---
+
+
+## Business Understanding
+Efforts in the fight against "the tsunami of hate and xenophobia in social media" appear to be largely failing, because hate is increasing, not diminishing, according to the Special Rapporteur on minority issues, Dr Fernand de Varennes. Hate speech comes in many forms on social media, and proves to be destructive to one's mental health and create unnecessary conflicts. In this notebook, a model based on Naive-Bayes formula is developed to detect hate speech.
+
+
+
+## Data Understanding
+The dataset that I will use come from the collection of hate speech from reddit posts. It contains a set of Reddit conversations that are manually labeled as hate or non-hate speech with intervention responses by Mechanical Turk workers. In the following, the dataset is read, and I find out there is not needed data, so I remove column 1 and 4 - column "id" and column "response".
+
+
+```{r}
+url <- "https://raw.githubusercontent.com/HAN-M3DM-Data-Mining/assignments/master/datasets/NB-reddit-hate-speech.csv"
+hate_speech <- read_csv(url)
+rawDF <- hate_speech[c(3,2)]
+head(rawDF)
+```
+
+The cleaned data set has 2 columns and 5020 rows
+
+I categorize hate_speech index to "normal" or "hateful" to determine if the conversation is hateful or not
+```{r}
+rawDF$hate_speech_idx <- ifelse(rawDF$hate_speech_idx == "n/a", "normal", "hateful")
+view(rawDF)
+```
+
+The variable "hate_speech_idx" is of class "character". As it indicates whether the message belongs to the category "normal" or "hateful" we should convert it to a factor variable.
+
+```{r}
+rawDF$hate_speech_idx <- rawDF$hate_speech_idx %>% factor %>% relevel ("hateful")
+class(rawDF$hate_speech_idx)
+```
+
+
+```{r}
+normal <- rawDF %>% filter(hate_speech_idx == "normal")
+hateful <- rawDF %>% filter(hate_speech_idx == "hateful")
+wordcloud(normal$text, max.words = 20, scale = c(4, 0.8), colors= c("indianred1","indianred2","indianred3","indianred"))
+wordcloud(hateful$text, max.words = 20, scale = c(4, 0.8), colors= c("lightsteelblue1","lightsteelblue2","lightsteelblue3","lightsteelblue"))
+```
+Through obervations, in hateful posts, words like woman, retarded and others used for insulsting purposes are used, which make sense. 
+
+## Data Preparation
+
+First I need to create a corpus, which refers to a collection of text documents. In our case each sms is considered a text document. I’ll use the Corpus() function from the tm package.
+
+
+```{r}
+rawCorpus <- Corpus(VectorSource(rawDF$text))
+inspect(rawCorpus[1:3])
+```
+The corpus contains 5020 documents. Which obviously matches with the number of rows in our dataset.
+
+I will use the function tm_map() to do some first cleaning up. First I’ll change everything to lowercase. I’ll also remove numbers as these will contain litle information on a post being hateful or not.
+
+```{r}
+cleanCorpus <- rawCorpus %>% tm_map(tolower) %>% tm_map(removeNumbers)
+
+```
+For computation efficiency it is important to eliminate all items from a dataset of which you’re rather confident that they’ do’ll add little information to your model. In our case we can expect that words like “and” or “but” will be equally common in both hateful and normal messages. We should therefore filter them out before we start modeling. We’ll also remove punctuation.
+
+
+```{r}
+cleanCorpus <- cleanCorpus %>% tm_map(tolower) %>% tm_map(removeWords, stopwords()) %>% tm_map(removePunctuation)
+```
+
+Now that we have removed certain items, the text lines contain a lot of whitespaces where these items used to be. In our last step we will remove additional whitespace.
+
+```{r}
+cleanCorpus <- cleanCorpus %>% tm_map(stripWhitespace)
+```
+
+Let’s inspect the corpus again. Compare it to the raw version.
+
+```{r}
+tibble(Raw = rawCorpus$content[1:3], Clean = cleanCorpus$content[1:3])
+```
+Now that we have cleaned up the texts, we are going to transform the messages to a matrix. Each word in the each message will get its own column, each row will be a message and the cells of the matrix will contain a word count.
+
+```{r}
+cleanDTM <- cleanCorpus %>% DocumentTermMatrix
+inspect(cleanDTM)
+```
+Before we start modeling we need to split all datasets into train and test sets. For this we will use a function from the caret package. The function createDataPartition() can be used to create balanced splits of the data. If the y argument to this function is a factor, the random sampling occurs within each class and should preserve the overall class distribution of the data. In this case we’ll create a 75/25% split.
+
+
+```{r}
+#Create split indices
+set.seed(1234)
+trainIndex <- createDataPartition(rawDF$hate_speech_idx, p = .75, 
+                                  list = FALSE, 
+                                  times = 1)
+head(trainIndex)
+```
+
+```{r}
+# Apply split indices to DF
+trainDF <- rawDF[trainIndex, ]
+```
+
+```{r}
+testDF <- rawDF[-trainIndex, ]
+
+# Apply split indices to Corpus
+trainCorpus <- cleanCorpus[trainIndex]
+testCorpus <- cleanCorpus[-trainIndex]
+
+# Apply split indices to DTM
+trainDTM <- cleanDTM[trainIndex, ]
+testDTM <- cleanDTM[-trainIndex, ]
+```
+As I check the DTM has 36588 words. Remember that each feature in the DTM is a word. Some words will have very few counts and therefore will have limited predictive power. To save on computation time I will eliminate words with low frequencies.
+```{r}
+freqWords <- trainDTM %>% findFreqTerms(5)
+trainDTM <-  DocumentTermMatrix(trainCorpus, list(dictionary = freqWords))
+testDTM <-  DocumentTermMatrix(testCorpus, list(dictionary = freqWords))
+```
+With this operation we’ve reduced the number of features to around 8368 words
+
+Another issue is that the Naive Bayes classifier is typically trained on categorical features. We now have numerical matrix with word counts. We will transform the counts into a factor that simply indicates whether the word appears in the document or not. We’ll first build our own function for this and then apply it to each column in the DTM.
+```{r}
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, 1, 0) %>% factor(levels = c(0,1), labels = c("No", "Yes"))
+}
+
+nColsDTM <- dim(trainDTM)[2]
+trainDTM <- apply(trainDTM, MARGIN = 2, convert_counts)
+testDTM <- apply(testDTM, MARGIN = 2, convert_counts)
+
+head(trainDTM[,1:10])
+```
+
+
+
+## Modeling
+We have now everything in place to start training our model and evaluate against our test dataset. The naiveBayes() function is part of the e1071 package. It takes in the features and labels of our training dataset and returns a trained model.
+
+```{r}
+nbayesModel <-  naiveBayes(trainDTM, trainDF$hate_speech_idx, laplace = 1)
+```
+
+The model can be applied to the test features using the predict() funtion which generates a vector of predictions. Using a confusion matrix we can analyze the performance of our model.
+
+```{r}
+predVec <- predict(nbayesModel, testDTM)
+confusionMatrix(predVec, testDF$hate_speech_idx, positive = "normal", dnn = c("Prediction", "True"))
+```
+
+## Evaluation and Deployment
+
+-Good business understanding analysis
+-Clear explanations for each step
+-Line 35: this line of code failed at first then I made an adjustment as following:
+read_csv should be changed into read.csv because we are reading a data frame. 
+-Line 66, 99: in Hatespeech case, we do not have text in SMS but comments/ conversations on Reddit. Thus, each SMS should be changed into each comment.
