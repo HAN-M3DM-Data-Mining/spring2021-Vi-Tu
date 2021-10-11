@@ -109,3 +109,11 @@ confusionMatrix(cleanDF_test_pred, test_labels, positive = NULL, dnn = c("Predic
 text and code here
 
 reviewer adds suggestions for improving the model
+
+- Add section evaluation and deployment
+
+- Add reference
+
+- Using `` to express function to make it easier for reader
+
+-
