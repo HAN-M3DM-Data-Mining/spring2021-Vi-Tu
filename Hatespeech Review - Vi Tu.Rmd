@@ -169,6 +169,8 @@ confusionMatrix(predVec, testDF$hate_speech_idx, positive = "normal", dnn = c("P
 
 ## Evaluation and Deployment
 
+## Reviews
+-Should include the evaluation & deployment
 -Good business understanding analysis
 -Clear explanations for each step
 -Line 35: this line of code failed at first then I made an adjustment as following:
